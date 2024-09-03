@@ -1,82 +1,66 @@
-import sys
-from PyQt5.QtCore import Qt, QUrl, QPoint
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile, QWebEnginePage
+import subprocess
+import time
+import win32gui
+import win32con
+import threading
+import os
 
+def launch_chrome_kiosk_mode():
+    chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    url = "https://claude.ai/chat"
+    user_data_dir = os.path.expanduser("~") + r"\AppData\Local\Google\Chrome\User Data\ClaudeProfile"
+    chrome_options = [
+        "--app=" + url,
+        "--window-size=800,700",
+        "--window-position=100,100",
+        f"--user-data-dir={user_data_dir}",
+        "--disable-extensions",
+        "--disable-plugins",
+        "--disable-software-rasterizer",
+        "--disable-dev-tools",
+        "--no-first-run",
+        "--no-default-browser-check"
+    ]
 
-class MiniBrowser(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    try:
+        subprocess.Popen([chrome_path] + chrome_options)
+        print("Chrome launched successfully.")
+    except Exception as e:
+        print(f"Failed to launch Chrome: {e}")
 
-        # Set window properties
-        self.setWindowTitle('Claude Mini Browser')
-        self.setFixedSize(500, 600)  # Adjust the size as needed
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)  # Keeps the window on top
-        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)  # Remove the title bar
+def find_claude_window():
+    def callback(hwnd, hwnds):
+        if win32gui.IsWindowVisible(hwnd) and "Claude" in win32gui.GetWindowText(hwnd):
+            hwnds.append(hwnd)
+        return True
 
-        # Create a web engine view
-        self.browser = QWebEngineView()
-        self.browser.setUrl(QUrl("https://www.claude.ai/"))  # URL to load Claude's website
+    hwnds = []
+    win32gui.EnumWindows(callback, hwnds)
+    return hwnds[0] if hwnds else None
 
-        # Set a custom user-agent
-        self.browser.page().profile().setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+def keep_on_top(hwnd):
+    while True:
+        try:
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, 
+                                  win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+            time.sleep(0.1)
+        except:
+            print("Claude window no longer exists. Stopping keep-on-top.")
+            break
 
-        # Enable JavaScript and Pop-ups
-        profile = self.browser.page().profile()
-        profile.settings().setAttribute(profile.settings().JavascriptEnabled, True)
-        profile.settings().setAttribute(profile.settings().JavascriptCanOpenWindows, True)
+def main():
+    launch_chrome_kiosk_mode()
+    time.sleep(5)  # Wait for Chrome to start
 
-        # Handle new window requests
-        self.browser.page().setFeaturePermission(QUrl("https://www.claude.ai/"), QWebEnginePage.Feature.PermissionGrantedByUser)
+    hwnd = find_claude_window()
+    if hwnd:
+        print("Claude window found. Setting always on top.")
+        threading.Thread(target=keep_on_top, args=(hwnd,), daemon=True).start()
+    else:
+        print("Failed to find Claude window.")
 
-        self.browser.page().profile().setRequestInterceptor(self.CustomRequestInterceptor())
-
-        # Create a central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        # Set layout and add browser to it
-        layout = QVBoxLayout()
-        layout.addWidget(self.browser)
-        central_widget.setLayout(layout)
-
-        # Variables for dragging
-        self._is_dragging = False
-        self._start_position = QPoint()
-
-    # Override mouse events to make window draggable
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._is_dragging = True
-            self._start_position = event.globalPos() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if self._is_dragging:
-            self.move(event.globalPos() - self._start_position)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._is_dragging = False
-            event.accept()
-
-    # Custom request interceptor to allow Google OAuth pop-ups
-    class CustomRequestInterceptor(QWebEnginePage):
-        def createWindow(self, _type):
-            new_browser = QWebEngineView()
-            new_browser.setWindowFlag(Qt.WindowStaysOnTopHint)
-            new_browser.setWindowFlags(Qt.Window)
-            new_browser.show()
-            return new_browser
-
+    while True:
+        time.sleep(1)
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    # Create and display the mini browser window
-    window = MiniBrowser()
-    window.show()
-
-    # Execute the application
-    sys.exit(app.exec_())
+    main()
